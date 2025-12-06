@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -12,13 +12,15 @@ import {
   Shield,
   CheckCircle2,
   AlertCircle,
-  Save,
+  Upload,
+  X,
+  Plus,
+  Loader2,
 } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -40,6 +42,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const profileSchema = z.object({
   full_name: z.string().min(2, "Name must be at least 2 characters"),
@@ -74,10 +82,20 @@ export default function Profile() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<any>(null);
   const [skills, setSkills] = useState<any[]>([]);
   const [userSkills, setUserSkills] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [showCameraDialog, setShowCameraDialog] = useState(false);
+  const [customSkill, setCustomSkill] = useState("");
+  const [addingSkill, setAddingSkill] = useState(false);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [stream, setStream] = useState<MediaStream | null>(null);
 
   const form = useForm<ProfileForm>({
     resolver: zodResolver(profileSchema),
@@ -90,6 +108,9 @@ export default function Profile() {
     },
   });
 
+  // Watch form values for auto-save
+  const watchedValues = form.watch();
+
   useEffect(() => {
     if (!user) {
       navigate("/auth");
@@ -98,6 +119,35 @@ export default function Profile() {
     fetchProfile();
     fetchSkills();
   }, [user, navigate]);
+
+  // Auto-save debounce
+  useEffect(() => {
+    if (!profile || !user) return;
+    
+    const timeoutId = setTimeout(() => {
+      const currentValues = form.getValues();
+      const hasChanges = 
+        currentValues.full_name !== profile.full_name ||
+        currentValues.phone !== (profile.phone || "") ||
+        currentValues.city !== (profile.city || "") ||
+        currentValues.address !== (profile.address || "");
+      
+      if (hasChanges && currentValues.full_name.length >= 2) {
+        autoSave(currentValues);
+      }
+    }, 1500);
+
+    return () => clearTimeout(timeoutId);
+  }, [watchedValues]);
+
+  // Cleanup camera stream on unmount
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [stream]);
 
   async function fetchProfile() {
     if (!user) return;
@@ -123,7 +173,6 @@ export default function Profile() {
   async function fetchSkills() {
     if (!user) return;
 
-    // Fetch all skills
     const { data: allSkills } = await supabase
       .from("skills")
       .select("*")
@@ -131,7 +180,6 @@ export default function Profile() {
 
     if (allSkills) setSkills(allSkills);
 
-    // Fetch user's skills
     const { data: userSkillsData } = await supabase
       .from("user_skills")
       .select("*, skill:skills(*)")
@@ -140,11 +188,11 @@ export default function Profile() {
     if (userSkillsData) setUserSkills(userSkillsData);
   }
 
-  async function onSubmit(data: ProfileForm) {
+  const autoSave = useCallback(async (data: ProfileForm) => {
     if (!user) return;
 
-    setLoading(true);
-    const { error } = await supabase
+    setSaving(true);
+    await supabase
       .from("profiles")
       .update({
         full_name: data.full_name,
@@ -154,18 +202,135 @@ export default function Profile() {
       })
       .eq("id", user.id);
 
-    setLoading(false);
+    setSaving(false);
+    setProfile((prev: any) => ({
+      ...prev,
+      full_name: data.full_name,
+      phone: data.phone || null,
+      city: data.city || null,
+      address: data.address || null,
+    }));
+  }, [user]);
 
-    if (error) {
+  async function onSubmit(data: ProfileForm) {
+    await autoSave(data);
+    toast({ title: "Profile saved!" });
+  }
+
+  async function uploadPhoto(file: File) {
+    if (!user) return;
+
+    setUploadingPhoto(true);
+
+    const fileExt = file.name.split(".").pop();
+    const filePath = `${user.id}/${Date.now()}.${fileExt}`;
+
+    // Upload to storage
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) {
       toast({
-        title: "Update failed",
-        description: error.message,
+        title: "Upload failed",
+        description: uploadError.message,
+        variant: "destructive",
+      });
+      setUploadingPhoto(false);
+      return;
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from("avatars")
+      .getPublicUrl(filePath);
+
+    // Update profile
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({ profile_photo_url: publicUrl })
+      .eq("id", user.id);
+
+    setUploadingPhoto(false);
+
+    if (updateError) {
+      toast({
+        title: "Failed to update profile",
+        description: updateError.message,
         variant: "destructive",
       });
     } else {
-      toast({ title: "Profile updated!" });
-      fetchProfile();
+      toast({ title: "Photo updated!" });
+      setProfile((prev: any) => ({ ...prev, profile_photo_url: publicUrl }));
     }
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast({
+          title: "File too large",
+          description: "Please select an image under 5MB",
+          variant: "destructive",
+        });
+        return;
+      }
+      uploadPhoto(file);
+    }
+  }
+
+  async function startCamera() {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+      setStream(mediaStream);
+      setShowCameraDialog(true);
+      
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+        }
+      }, 100);
+    } catch (error) {
+      toast({
+        title: "Camera access denied",
+        description: "Please allow camera access to take a photo",
+        variant: "destructive",
+      });
+    }
+  }
+
+  function capturePhoto() {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.drawImage(video, 0, 0);
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const file = new File([blob], "camera-photo.jpg", { type: "image/jpeg" });
+          uploadPhoto(file);
+        }
+      }, "image/jpeg", 0.9);
+    }
+
+    closeCameraDialog();
+  }
+
+  function closeCameraDialog() {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+    setShowCameraDialog(false);
   }
 
   async function toggleSkill(skillId: string) {
@@ -185,6 +350,57 @@ export default function Profile() {
     fetchSkills();
   }
 
+  async function addCustomSkill() {
+    if (!user || !customSkill.trim()) return;
+
+    setAddingSkill(true);
+
+    // Check if skill already exists
+    const { data: existingSkill } = await supabase
+      .from("skills")
+      .select("id")
+      .ilike("name", customSkill.trim())
+      .maybeSingle();
+
+    let skillId: string;
+
+    if (existingSkill) {
+      skillId = existingSkill.id;
+    } else {
+      // Create new skill
+      const { data: newSkill, error } = await supabase
+        .from("skills")
+        .insert({ name: customSkill.trim() })
+        .select("id")
+        .single();
+
+      if (error || !newSkill) {
+        toast({
+          title: "Failed to add skill",
+          description: error?.message || "Unknown error",
+          variant: "destructive",
+        });
+        setAddingSkill(false);
+        return;
+      }
+      skillId = newSkill.id;
+    }
+
+    // Check if user already has this skill
+    const hasSkill = userSkills.some((us) => us.skill_id === skillId);
+    if (!hasSkill) {
+      await supabase.from("user_skills").insert({
+        user_id: user.id,
+        skill_id: skillId,
+      });
+    }
+
+    setCustomSkill("");
+    setAddingSkill(false);
+    fetchSkills();
+    toast({ title: "Skill added!" });
+  }
+
   if (!profile) {
     return (
       <Layout>
@@ -198,7 +414,15 @@ export default function Profile() {
   return (
     <Layout>
       <div className="container py-6 max-w-3xl">
-        <h1 className="text-2xl font-bold mb-6">Profile Settings</h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">Profile Settings</h1>
+          {saving && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Auto-saving...
+            </div>
+          )}
+        </div>
 
         <Tabs defaultValue="profile" className="space-y-6">
           <TabsList>
@@ -218,27 +442,66 @@ export default function Profile() {
                       {profile.full_name?.[0] || "U"}
                     </AvatarFallback>
                   </Avatar>
-                  <button className="absolute bottom-0 right-0 h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg">
-                    <Camera className="h-4 w-4" />
-                  </button>
+                  {uploadingPhoto && (
+                    <div className="absolute inset-0 bg-background/80 rounded-full flex items-center justify-center">
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <h2 className="text-xl font-semibold">{profile.full_name}</h2>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Badge variant="secondary" className="capitalize">
-                      {profile.role}
-                    </Badge>
-                    {profile.verification_status === "verified" ? (
-                      <Badge className="bg-success/10 text-success">
-                        <CheckCircle2 className="h-3 w-3 mr-1" />
-                        Verified
+                <div className="space-y-3">
+                  <div>
+                    <h2 className="text-xl font-semibold">{profile.full_name}</h2>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Badge variant="secondary" className="capitalize">
+                        {profile.role}
                       </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-warning">
-                        <AlertCircle className="h-3 w-3 mr-1" />
-                        Pending
-                      </Badge>
-                    )}
+                      {profile.verification_status === "verified" ? (
+                        <Badge className="bg-success/10 text-success">
+                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                          Verified
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-warning">
+                          <AlertCircle className="h-3 w-3 mr-1" />
+                          Pending
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                    />
+                    <input
+                      ref={cameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="user"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingPhoto}
+                    >
+                      <Upload className="h-4 w-4 mr-2" />
+                      Upload
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={startCamera}
+                      disabled={uploadingPhoto}
+                    >
+                      <Camera className="h-4 w-4 mr-2" />
+                      Camera
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -345,10 +608,9 @@ export default function Profile() {
                     />
                   </div>
 
-                  <Button type="submit" disabled={loading}>
-                    <Save className="h-4 w-4 mr-2" />
-                    {loading ? "Saving..." : "Save Changes"}
-                  </Button>
+                  <p className="text-sm text-muted-foreground">
+                    Changes are saved automatically
+                  </p>
                 </form>
               </Form>
             </Card>
@@ -358,31 +620,75 @@ export default function Profile() {
             <Card className="glass-card p-6">
               <h2 className="text-lg font-semibold mb-4">Your Skills</h2>
               <p className="text-muted-foreground mb-6">
-                Select skills that match your abilities. This helps employers find you.
+                Select skills that match your abilities or add your own.
               </p>
 
-              <div className="flex flex-wrap gap-2">
-                {skills.map((skill) => {
-                  const isSelected = userSkills.some(
-                    (us) => us.skill_id === skill.id
-                  );
-                  return (
-                    <Badge
-                      key={skill.id}
-                      variant={isSelected ? "default" : "outline"}
-                      className="cursor-pointer transition-all"
-                      onClick={() => toggleSkill(skill.id)}
-                    >
-                      {isSelected && <CheckCircle2 className="h-3 w-3 mr-1" />}
-                      {skill.name}
-                    </Badge>
-                  );
-                })}
+              {/* Custom skill input */}
+              <div className="flex gap-2 mb-6">
+                <Input
+                  placeholder="Type a skill not in the list..."
+                  value={customSkill}
+                  onChange={(e) => setCustomSkill(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCustomSkill();
+                    }
+                  }}
+                />
+                <Button
+                  onClick={addCustomSkill}
+                  disabled={!customSkill.trim() || addingSkill}
+                >
+                  {addingSkill ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                </Button>
               </div>
 
-              {skills.length === 0 && (
+              {/* User's current skills */}
+              {userSkills.length > 0 && (
+                <div className="mb-6">
+                  <p className="text-sm font-medium mb-2">Your selected skills:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {userSkills.map((us) => (
+                      <Badge
+                        key={us.id}
+                        variant="default"
+                        className="cursor-pointer"
+                        onClick={() => toggleSkill(us.skill_id)}
+                      >
+                        {us.skill?.name}
+                        <X className="h-3 w-3 ml-1" />
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Available skills */}
+              <p className="text-sm font-medium mb-2">Available skills:</p>
+              <div className="flex flex-wrap gap-2">
+                {skills
+                  .filter((skill) => !userSkills.some((us) => us.skill_id === skill.id))
+                  .map((skill) => (
+                    <Badge
+                      key={skill.id}
+                      variant="outline"
+                      className="cursor-pointer transition-all hover:bg-primary hover:text-primary-foreground"
+                      onClick={() => toggleSkill(skill.id)}
+                    >
+                      <Plus className="h-3 w-3 mr-1" />
+                      {skill.name}
+                    </Badge>
+                  ))}
+              </div>
+
+              {skills.length === 0 && userSkills.length === 0 && (
                 <p className="text-muted-foreground text-center py-8">
-                  No skills available. Check back later.
+                  No skills available. Add your own using the input above.
                 </p>
               )}
             </Card>
@@ -448,7 +754,7 @@ export default function Profile() {
                       </p>
                     </div>
                   </div>
-                  <Button variant="outline" size="sm">
+                  <Button variant="outline" size="sm" onClick={startCamera}>
                     Take Photo
                   </Button>
                 </div>
@@ -457,6 +763,36 @@ export default function Profile() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Camera Dialog */}
+      <Dialog open={showCameraDialog} onOpenChange={closeCameraDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Take a Photo</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="relative aspect-square bg-black rounded-lg overflow-hidden">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <canvas ref={canvasRef} className="hidden" />
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={closeCameraDialog} className="flex-1">
+                Cancel
+              </Button>
+              <Button onClick={capturePhoto} className="flex-1">
+                <Camera className="h-4 w-4 mr-2" />
+                Capture
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
