@@ -145,7 +145,7 @@ export default function MyGigs() {
     setDeleteGigId(null);
   }
 
-  async function updateGigStatus(id: string, status: string) {
+  async function updateGigStatus(id: string, status: "posted" | "cancelled") {
     const { error } = await supabase
       .from("gigs")
       .update({ status, posted_at: status === "posted" ? new Date().toISOString() : null })
@@ -297,7 +297,7 @@ export default function MyGigs() {
                             )}
                             {gig.status === "posted" && (
                               <DropdownMenuItem
-                                onClick={() => updateGigStatus(gig.id, "cancelled" as const)}
+                                onClick={() => updateGigStatus(gig.id, "cancelled" as "cancelled")}
                               >
                                 <Trash2 className="h-4 w-4 mr-2" />
                                 Cancel
