@@ -85,9 +85,9 @@ export function Header() {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link to="/jobs" className="cursor-pointer">
+                    <Link to="/dashboard" className="cursor-pointer">
                       <Settings className="mr-2 h-4 w-4" />
-                      My Jobs
+                      Dashboard
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
