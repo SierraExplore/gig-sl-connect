@@ -1,4 +1,4 @@
-import { Bell, Menu, Search, LogOut, Settings, User } from "lucide-react";
+import { Bell, Menu, Search, LogOut, Settings, User, Briefcase } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
@@ -88,6 +88,12 @@ export function Header() {
                     <Link to="/dashboard" className="cursor-pointer">
                       <Settings className="mr-2 h-4 w-4" />
                       Dashboard
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/my-jobs" className="cursor-pointer">
+                      <Briefcase className="mr-2 h-4 w-4" />
+                      My Jobs
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />

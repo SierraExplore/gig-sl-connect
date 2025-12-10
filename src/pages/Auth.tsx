@@ -364,6 +364,12 @@ export default function Auth() {
                 <Button type="submit" className="w-full" size="lg" disabled={loading}>
                   {loading ? "Signing in..." : "Sign In"}
                 </Button>
+
+                <div className="text-center">
+                  <Link to="/forgot-password" className="text-sm text-primary hover:underline">
+                    Forgot your password?
+                  </Link>
+                </div>
               </form>
             )}
 
