@@ -25,6 +25,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import MyJobs from "./pages/MyJobs";
 import UserProfile from "./pages/UserProfile";
+import Messages from "./pages/Messages";
 
 const queryClient = new QueryClient();
 
@@ -55,6 +56,7 @@ const App = () => (
             <Route path="/my-gigs/:id/edit" element={<EditGig />} />
             <Route path="/my-gigs/:id/applications" element={<GigApplications />} />
             <Route path="/my-jobs" element={<MyJobs />} />
+            <Route path="/messages" element={<Messages />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/onboarding" element={<Onboarding />} />
             

@@ -1,4 +1,4 @@
-import { Bell, Menu, Search, LogOut, Settings, User, Briefcase } from "lucide-react";
+import { Bell, Menu, Search, LogOut, Settings, User, Briefcase, MessageCircle } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
@@ -54,6 +54,11 @@ export function Header() {
           
           {user ? (
             <>
+              <Link to="/messages">
+                <Button variant="ghost" size="icon" className="relative">
+                  <MessageCircle className="h-5 w-5" />
+                </Button>
+              </Link>
               <Link to="/notifications">
                 <Button variant="ghost" size="icon" className="relative">
                   <Bell className="h-5 w-5" />

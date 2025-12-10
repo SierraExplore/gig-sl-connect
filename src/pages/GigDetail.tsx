@@ -12,6 +12,7 @@ import {
   Heart,
   AlertCircle,
   Send,
+  MessageCircle,
 } from "lucide-react";
 import { Layout } from "@/components/layout/Layout";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getOrCreateConversation } from "@/hooks/useConversation";
 
 export default function GigDetail() {
   const { id } = useParams<{ id: string }>();
@@ -314,6 +316,26 @@ export default function GigDetail() {
                     )}
                   </div>
                 </div>
+                {user && !isOwner && (
+                  <Button
+                    variant="outline"
+                    className="w-full mt-4"
+                    onClick={async () => {
+                      if (!gig.employer?.profile?.id) return;
+                      const conversationId = await getOrCreateConversation(
+                        user.id,
+                        gig.employer.profile.id,
+                        gig.id
+                      );
+                      if (conversationId) {
+                        navigate(`/messages?conversation=${conversationId}`);
+                      }
+                    }}
+                  >
+                    <MessageCircle className="h-4 w-4 mr-2" />
+                    Message Employer
+                  </Button>
+                )}
               </Card>
             )}
           </div>
