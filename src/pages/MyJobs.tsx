@@ -61,6 +61,7 @@ interface JobInstance {
     full_name: string;
     profile_photo_url: string | null;
   };
+  hasRated?: boolean;
 }
 
 const statusConfig: Record<string, { color: string; label: string; icon: React.ElementType }> = {
@@ -181,7 +182,22 @@ export default function MyJobs() {
     }
 
     const { data } = await query;
-    if (data) setJobs(data as unknown as JobInstance[]);
+    if (data) {
+      // Check which jobs user has already rated
+      const { data: myRatings } = await supabase
+        .from("ratings")
+        .select("job_instance_id")
+        .eq("rater_id", user.id);
+      
+      const ratedJobIds = new Set(myRatings?.map(r => r.job_instance_id) || []);
+      
+      const jobsWithRating = (data as unknown as JobInstance[]).map(job => ({
+        ...job,
+        hasRated: ratedJobIds.has(job.id),
+      }));
+      
+      setJobs(jobsWithRating);
+    }
     setLoading(false);
   }
 
@@ -388,7 +404,13 @@ export default function MyJobs() {
                             {job.gig.title}
                           </Link>
                           <p className="text-sm text-muted-foreground">
-                            {isWorker ? "Employer" : "Worker"}: {otherParty?.full_name}
+                            {isWorker ? "Employer" : "Worker"}:{" "}
+                            <Link
+                              to={`/users/${otherParty?.id}`}
+                              className="text-primary hover:underline"
+                            >
+                              {otherParty?.full_name}
+                            </Link>
                           </p>
 
                           <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-muted-foreground">
@@ -446,11 +468,12 @@ export default function MyJobs() {
                         {job.status === "completed" && (
                           <Button
                             size="sm"
-                            variant="outline"
-                            onClick={() => setRatingDialog(job)}
+                            variant={job.hasRated ? "ghost" : "outline"}
+                            onClick={() => !job.hasRated && setRatingDialog(job)}
+                            disabled={job.hasRated}
                           >
-                            <Star className="h-4 w-4 mr-1" />
-                            Rate {isWorker ? "Employer" : "Worker"}
+                            <Star className={`h-4 w-4 mr-1 ${job.hasRated ? "fill-warning text-warning" : ""}`} />
+                            {job.hasRated ? "Rated" : `Rate ${isWorker ? "Employer" : "Worker"}`}
                           </Button>
                         )}
                       </div>
